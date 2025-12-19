@@ -34,17 +34,6 @@ class CardType(Enum):
     BATTLE = "Battle"
 
 
-def get_inventory() -> dict[str, dict[str, str]]:
-    inventory: dict[str, dict[str, str]] = dict()
-
-    with open("inventory.csv", newline='', encoding="utf-8") as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            inventory[unidecode(row["Name"]).split(" // ")[0]] = row
-
-        return inventory
-
-
 class DeckBuilder:
     def __init__(self, inventory_file: TextIO, edhrec_provider: EdhrecProvider):
         self.edhrec_provider = edhrec_provider
