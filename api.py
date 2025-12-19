@@ -4,16 +4,18 @@ import uuid
 from io import StringIO
 from queue import Queue, Empty
 from threading import Thread, Event
+from urllib.parse import urlparse, unquote_plus
+import requests
 
 from flask import Flask, request, render_template, jsonify, Response
 
-from edhrec_provider import ClientProvidedEdhrecProvider
+from edhrec_provider import ClientProvidedEdhrecProvider, ServerEdhrecProvider
 from main import BudgetType, DeckBuilder
 
 app = Flask(__name__, template_folder="templates")
 
 # Simple in-memory session store for builds
-# build_id -> {queue: Queue(), provider_payload: dict, finished: bool, update_event: Event}
+# build_id -> {queue: Queue(), provider_payload: dict, finished: bool, update_event: Event, cancelled: bool}
 BUILD_SESSIONS: dict[str, dict] = {}
 
 
@@ -44,13 +46,14 @@ def start_build():
         return jsonify({"error": "Invalid file format. Please upload a CSV file."}), 400
 
     build_id = str(uuid.uuid4())
-    session = {"queue": Queue(), "provider_payload": {}, "finished": False, "update_event": Event()}
+    session = {"queue": Queue(), "provider_payload": {}, "finished": False, "update_event": Event(), "cancelled": False}
     BUILD_SESSIONS[build_id] = session
 
     # if client provided edhrec_data upfront, store it
     if edhrec_data:
         try:
-            session["provider_payload"] = json.loads(edhrec_data)
+            # keep for informational purposes; provider selection is below
+            parsed = json.loads(edhrec_data)
         except Exception:
             logging.getLogger(__name__).exception("Invalid edhrec_data JSON")
             return jsonify({"error": "Invalid edhrec_data JSON"}), 400
@@ -71,33 +74,47 @@ def start_build():
     # Start builder in a background thread; it will push messages into session['queue']
     def run_builder():
         try:
-            attempt = 0
-            while True:
-                attempt += 1
-                provider = ClientProvidedEdhrecProvider(session["provider_payload"])
+            # if cancelled before start, exit early
+            if session.get("cancelled"):
+                session["queue"].put(("cancelled", {"message": "Build cancelled by user"}))
+                session["finished"] = True
+                return
 
-                def progress_callback(msg: str):
-                    session["queue"].put(("progress", {"message": msg}))
-
-                builder = DeckBuilder(inventory_content, edhrec_provider=provider, progress_callback=progress_callback)
+            # Choose provider: if client supplied edhrec_data use client provider, else use server-side provider
+            provider = None
+            if edhrec_data:
                 try:
-                    result = builder.build(commander, partner, (theme.lower() if theme else None), budget_type)
+                    payload = json.loads(edhrec_data)
+                    provider = ClientProvidedEdhrecProvider(payload)
+                except Exception:
+                    logging.getLogger(__name__).exception("Invalid edhrec_data JSON in run_builder")
+                    session["queue"].put(("error", {"message": "Invalid edhrec_data JSON provided"}))
+                    session["finished"] = True
+                    return
+            else:
+                try:
+                    provider = ServerEdhrecProvider()
+                except Exception as e:
+                    logging.getLogger(__name__).exception("Server EDHRec provider initialization failed")
+                    session["queue"].put(("error", {"message": f"Server EDHRec provider unavailable: {e}"}))
+                    session["finished"] = True
+                    return
+
+            def progress_callback(msg: str):
+                if session.get("cancelled"):
+                    return
+                session["queue"].put(("progress", {"message": msg}))
+
+            builder = DeckBuilder(inventory_content, edhrec_provider=provider, progress_callback=progress_callback)
+            try:
+                result = builder.build(commander, partner, (theme.lower() if theme else None), budget_type)
+                if session.get("cancelled"):
+                    session["queue"].put(("cancelled", {"message": "Build cancelled by user"}))
+                else:
                     session["queue"].put(("result", {"result": result}))
-                    break
-                except KeyError as e:
-                    # Missing edhrec payload data required by provider, ask client to provide
-                    missing_key = str(e).strip("'")
-                    session["queue"].put(("request", {"missing_key": missing_key}))
-                    # Wait for client to POST /update with the missing data. If timeout, return error.
-                    got = session["update_event"].wait(timeout=120)
-                    session["update_event"].clear()
-                    if not got:
-                        session["queue"].put(("error", {"message": f"Timed out waiting for missing data: {missing_key}"}))
-                        break
-                    # else loop and retry building with updated payload
-        except Exception as e:
-            logging.getLogger(__name__).exception("Builder failed")
-            session["queue"].put(("error", {"message": str(e)}))
+            except Exception as e:
+                logging.getLogger(__name__).exception("Builder failed")
+                session["queue"].put(("error", {"message": str(e)}))
         finally:
             session["finished"] = True
 
@@ -152,6 +169,77 @@ def update_build():
         return jsonify({"status": "updated"})
 
     return jsonify({"error": "No recognized update in payload"}), 400
+
+
+@app.route("/cancel", methods=["POST"])
+def cancel_build():
+    try:
+        payload = request.get_json(force=True)
+    except Exception:
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+    build_id = payload.get("build_id")
+    if not build_id or build_id not in BUILD_SESSIONS:
+        return jsonify({"error": "Invalid or missing build_id"}), 400
+
+    session = BUILD_SESSIONS[build_id]
+    session["cancelled"] = True
+    # wake any waiting builder
+    session["update_event"].set()
+    # notify client stream
+    session["queue"].put(("cancelled", {"message": "Build cancelled by user"}))
+    return jsonify({"status": "cancelled"})
+
+
+@app.route("/proxy", methods=["GET"])
+def proxy():
+    # Simple server-side proxy only allowing json.edhrec.com to avoid open proxy abuse
+    url = request.args.get('url')
+    if not url:
+        return jsonify({"error": "Missing url parameter"}), 400
+    try:
+        url = unquote_plus(url)
+        parsed = urlparse(url)
+        host = parsed.hostname or ''
+        allowed_hosts = {"json.edhrec.com", "edhrec.com"}
+        if host not in allowed_hosts:
+            return jsonify({"error": "Host not allowed"}), 403
+        # fetch the URL server-side
+        resp = requests.get(url, timeout=10)
+        content_type = resp.headers.get('Content-Type', 'application/json')
+        if resp.status_code != 200:
+            return (resp.text, resp.status_code, {'Content-Type': content_type})
+        return (resp.content, 200, {'Content-Type': content_type})
+    except requests.RequestException as e:
+        logging.getLogger(__name__).exception("Proxy request failed")
+        return jsonify({"error": f"Proxy fetch failed: {e}"}), 502
+
+
+@app.route("/edhrec_build_id", methods=["GET"])
+def edhrec_build_id():
+    """Return the current edhrec Next.js build id by scraping the homepage's __NEXT_DATA__ script block.
+    This matches pyedhrec. Returns JSON { build_id: "..." } or 502 on failure.
+    """
+    try:
+        resp = requests.get("https://edhrec.com", timeout=10)
+        resp.raise_for_status()
+        text = resp.text
+        import re, json as _json
+        m = re.search(r"<script id=\"__NEXT_DATA__\" type=\"application/json\">(.*?)</script>", text, re.S)
+        if not m:
+            return jsonify({"error": "Could not find NEXT_DATA"}), 502
+        props_str = m.group(1)
+        try:
+            props = _json.loads(props_str)
+            build_id = props.get("buildId")
+            if not build_id:
+                return jsonify({"error": "buildId not found in NEXT_DATA"}), 502
+            return jsonify({"build_id": build_id})
+        except _json.JSONDecodeError:
+            return jsonify({"error": "Failed to parse NEXT_DATA"}), 502
+    except requests.RequestException as e:
+        logging.getLogger(__name__).exception("Failed to fetch edhrec homepage for build id")
+        return jsonify({"error": str(e)}), 502
 
 
 if __name__ == "__main__":

@@ -1,384 +1,197 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deck Builder</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 720px;
-            margin: 0 auto;
-            padding: 24px;
-            background: #f7f7f7;
-        }
-        h1 {
-            text-align: center;
-        }
-        form {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            background: #fff;
-            padding: 16px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-        }
-        form > div {
-            display: flex;
-            flex-direction: column;
-        }
-        label {
-            font-weight: bold;
-            margin-bottom: 4px;
-        }
-        input, select {
-            padding: 8px;
-        }
-        button {
-            padding: 10px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            cursor: pointer;
-            border-radius: 4px;
-        }
-        .secondary {
-            background-color: #2d7dd2;
-        }
-        #result {
-            margin-top: 20px;
-            padding: 12px;
-            background: #fff;
-            border-radius: 8px;
-            white-space: pre-wrap;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-        }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Deck Builder</title>
+  <style>
+    :root{
+      --bg:#f5f7fb; --card:#ffffff; --accent:#1f6feb; --muted:#6b7280; --danger:#dc2626; --success:#16a34a;
+      --radius:12px; --shadow:0 8px 30px rgba(16,24,40,0.06);
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;color:#0f172a;background:var(--bg);-webkit-font-smoothing:antialiased}
+    .wrap{max-width:900px;margin:28px auto;padding:20px}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+    h1{margin:0;font-size:20px}
+    .card{background:var(--card);padding:18px;border-radius:var(--radius);box-shadow:var(--shadow)}
+    .layout{display:grid;grid-template-columns:1fr 320px;gap:18px}
+    @media (max-width:860px){.layout{grid-template-columns:1fr}}
+
+    form.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    input[type=text],select,input[type=file]{width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef8;background:transparent;font-size:14px}
+
+    .controls{grid-column:1/-1;display:flex;gap:12px;justify-content:flex-end}
+    button.primary{background:var(--accent);color:#fff;padding:10px 14px;border-radius:10px;border:none;font-weight:700;cursor:pointer}
+    button.primary[disabled]{opacity:0.6;cursor:not-allowed}
+    button.ghost{background:transparent;border:1px solid #e6eef8;padding:8px 12px;border-radius:8px;cursor:pointer}
+
+    /* overlay spinner */
+    .overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(7,10,20,0.35);z-index:60}
+    .overlay.visible{display:flex}
+    .panel{background:var(--card);padding:20px;border-radius:12px;min-width:320px;display:flex;flex-direction:column;gap:12px;align-items:center}
+    .big-spinner{width:48px;height:48px;border-radius:50%;border:6px solid rgba(0,0,0,0.06);border-top-color:var(--accent);animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* right column */
+    .right .card{padding:12px}
+    #progressLog{height:300px;overflow:auto;padding:10px;background:#0b1220;color:#e6eef8;border-radius:8px;font-family:monospace;font-size:13px}
+    .meta{color:var(--muted);font-size:13px;margin-bottom:8px}
+    .deck-box{padding:12px;background:linear-gradient(180deg,#fff,#fbfdff);border-radius:10px;min-height:140px}
+    .deck-lines{white-space:pre-wrap;font-family:monospace;font-size:14px}
+    .status{font-weight:700}
+    .small{font-size:13px;color:var(--muted)}
+  </style>
 </head>
 <body>
-    <h1>Deck Builder</h1>
-    <form id="deckForm" enctype="multipart/form-data">
-        <div>
+  <div class="wrap">
+    <header>
+      <h1>Deck Builder</h1>
+      <div class="small">Simple server-driven deck builder</div>
+    </header>
+
+    <div class="layout">
+      <div class="card">
+        <form id="deckForm" class="grid" enctype="multipart/form-data">
+          <div>
             <label for="commander">Commander</label>
-            <input type="text" id="commander" name="commander" placeholder="e.g. Lord of the Nazgul" required>
-        </div>
-        <div>
+            <input id="commander" name="commander" type="text" placeholder="e.g. Lord of the Nazgul" required />
+          </div>
+          <div>
             <label for="partner">Partner (optional)</label>
-            <input type="text" id="partner" name="partner" placeholder="Partner name">
-        </div>
-        <div>
+            <input id="partner" name="partner" type="text" placeholder="Partner name" />
+          </div>
+          <div>
             <label for="theme">Theme (optional)</label>
-            <input type="text" id="theme" name="theme" placeholder="e.g. zombies">
-        </div>
-        <div>
+            <input id="theme" name="theme" type="text" placeholder="e.g. zombies" />
+          </div>
+          <div>
             <label for="budget">Budget</label>
-            <select id="budget" name="budget">
-                <option value="REGULAR">Regular</option>
-                <option value="BUDGET">Budget</option>
-                <option value="EXPANSIVE">Expansive</option>
-            </select>
-        </div>
-        <div>
+            <select id="budget" name="budget"><option value="REGULAR">Regular</option><option value="BUDGET">Budget</option><option value="EXPANSIVE">Expansive</option></select>
+          </div>
+
+          <div>
             <label for="inventory">Inventory CSV</label>
-            <input type="file" id="inventory" name="inventory" accept=".csv" required>
+            <input id="inventory" name="inventory" type="file" accept=".csv" />
+            <div class="small" style="margin-top:6px;color:var(--muted)">Optional: upload inventory to use owned cards</div>
+          </div>
+
+          <div class="controls">
+            <button id="buildBtn" class="primary" type="submit"><span id="buildLabel">Build Deck</span></button>
+          </div>
+        </form>
+
+        <div style="margin-top:14px">
+          <div class="meta">Status: <span id="statusText" class="status">Idle</span></div>
+          <div class="deck-box card">
+            <div id="result" class="deck-lines">No deck built yet. Click Build Deck to start.</div>
+            <div style="margin-top:10px"><button id="downloadBtn" class="ghost" style="display:none">Download deck.txt</button></div>
+          </div>
         </div>
-        <div>
-            <label for="edhrec_data">EDHRec data (JSON fetched in browser)</label>
-            <textarea id="edhrec_data" name="edhrec_data" rows="10" placeholder='{"avg_deck": {"Card": 2}, "card_details": {...}}'></textarea>
-            <small id="edhrec_status" style="color:#555;"></small>
+      </div>
+
+      <div class="right">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:700">Progress log</div>
+            <div class="small">Events will appear here</div>
+          </div>
+          <div id="progressLog">No activity yet.</div>
         </div>
-        <div style="display:flex; gap:8px; align-items:flex-end;">
-            <button type="button" class="secondary" id="fetchEdhrecBtn">Fetch EDHRec data</button>
-            <button type="submit">Build Deck</button>
-        </div>
-    </form>
+      </div>
+    </div>
+  </div>
 
-    <div id="result"></div>
+  <div id="overlay" class="overlay">
+    <div class="panel">
+      <div class="big-spinner" aria-hidden="true"></div>
+      <div id="overlayText">Building deck...</div>
+      <div style="display:flex;gap:8px">
+        <button id="overlayStop" class="primary" style="background:var(--danger)">Stop</button>
+        <button id="overlayClose" class="ghost" style="display:none">Close</button>
+      </div>
+    </div>
+  </div>
 
-    <script>
-        const form = document.getElementById('deckForm');
-        const resultDiv = document.getElementById('result');
-        const fetchBtn = document.getElementById('fetchEdhrecBtn');
-        const edhrecTextarea = document.getElementById('edhrec_data');
-        const edhrecStatus = document.getElementById('edhrec_status');
+  <script>
+    // Elements
+    const form = document.getElementById('deckForm');
+    const buildBtn = document.getElementById('buildBtn');
+    const buildLabel = document.getElementById('buildLabel');
+    const overlay = document.getElementById('overlay');
+    const overlayText = document.getElementById('overlayText');
+    const overlayStop = document.getElementById('overlayStop');
+    const overlayClose = document.getElementById('overlayClose');
+    const resultDiv = document.getElementById('result');
+    const statusText = document.getElementById('statusText');
+    const progressLog = document.getElementById('progressLog');
+    const downloadBtn = document.getElementById('downloadBtn');
 
-        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    let currentBuildId = null; let es = null; window.latestResult = null;
 
-        const slugify = (str) =>
-            str
-                .toLowerCase()
-                .replace(/[^a-z0-9\s/-]/g, '')
-                .trim()
-                .replace(/\s+/g, '-')
-                .replace(/-+/g, '-');
+    function appendLog(msg){
+      const el = document.createElement('div');
+      el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      progressLog.appendChild(el);
+      progressLog.scrollTop = progressLog.scrollHeight;
+    }
 
-        const fetchJson = async (url) => {
-            const res = await fetch(url, { credentials: 'omit' });
-            if (!res.ok) throw new Error(`Request failed ${res.status}: ${url}`);
-            return res.json();
-        };
+    function showOverlay(text){ overlayText.textContent = text; overlay.classList.add('visible'); }
+    function hideOverlay(){ overlay.classList.remove('visible'); }
 
-        const parseDeckFromList = (list) => {
-            const deck = {};
-            if (!Array.isArray(list)) return deck;
-            for (const line of list) {
-                const parts = String(line).trim().split(' ');
-                if (!parts[0] || isNaN(Number(parts[0]))) continue;
-                const qty = Number(parts.shift());
-                const name = parts.join(' ');
-                if (name) deck[name] = qty;
-            }
-            return deck;
-        };
+    function setStatus(txt){ statusText.textContent = txt }
 
-        const buildCardDetails = (cardlists) => {
-            const cardDetails = {};
-            const topByType = {};
-            if (!Array.isArray(cardlists)) return { cardDetails, topByType };
+    function enterStarting(){ buildLabel.textContent = 'Starting...'; buildBtn.disabled = true; showOverlay('Starting build...'); setStatus('Starting'); }
+    function enterRunning(id){ currentBuildId = id; buildLabel.textContent = 'Stop'; buildBtn.disabled = false; showOverlay('Building deck...'); setStatus('Running'); }
+    function exitIdle(){ currentBuildId = null; buildLabel.textContent = 'Build Deck'; buildBtn.disabled = false; hideOverlay(); setStatus('Idle'); }
 
-            for (const group of cardlists) {
-                const cards = group.cards || [];
-                for (const card of cards) {
-                    const name = card.name;
-                    const primary_type = (card.types && card.types[0]) || card.primary_type || card.type || 'Unknown';
-                    cardDetails[name] = {
-                        name,
-                        primary_type,
-                        type: card.type || primary_type,
-                        color_identity: card.color_identity || card.colorIdentity || [],
-                    };
-                    if (!topByType[primary_type]) topByType[primary_type] = [];
-                    topByType[primary_type].push({
-                        name,
-                        primary_type,
-                        color_identity: cardDetails[name].color_identity,
-                    });
-                }
-            }
+    function formatDeck(result){
+      if (!result || !result.deck) return 'No deck returned.';
+      const deck = result.deck; const size = result.deck_size || Object.values(deck).reduce((s,v)=>s+(parseInt(v)||0),0);
+      let out = `Deck (${size} cards)\n\n`;
+      const lines = Object.entries(deck).sort((a,b)=>a[0].localeCompare(b[0])).map(([name,c])=>`${c} ${name}`);
+      out += lines.join('\n');
+      if (result.unavailable_cards && result.unavailable_cards.length){ out += '\n\nUnavailable: ' + result.unavailable_cards.join(', '); }
+      return out;
+    }
 
-            // sort each type list by EDHRec rank if present
-            Object.values(topByType).forEach((arr) => arr.sort((a, b) => (a.rank || 0) - (b.rank || 0)));
-            return { cardDetails, topByType };
-        };
+    function downloadDeck(result){ const text = formatDeck(result); const blob = new Blob([text],{type:'text/plain'}); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='deck.txt'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
 
-        const buildCardList = (cardDetails) => {
-            const cards = {};
-            Object.entries(cardDetails).forEach(([name, detail]) => {
-                cards[name] = { primary_type: detail.primary_type, type: detail.type, color_identity: detail.color_identity };
-            });
-            return { cards };
-        };
+    downloadBtn.addEventListener('click', ()=>{ if (window.latestResult) downloadDeck(window.latestResult); });
 
-        const fetchEdhrecData = async () => {
-            const commander = document.getElementById('commander').value.trim();
-            const theme = document.getElementById('theme').value.trim();
-            const budget = document.getElementById('budget').value;
-            if (!commander) {
-                edhrecStatus.textContent = 'Commander is required to fetch EDHRec data.';
-                return;
-            }
+    overlayStop.addEventListener('click', async ()=>{
+      if (!currentBuildId) return; overlayStop.disabled = true; appendLog('Cancel requested');
+      try{ await fetch('/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({build_id:currentBuildId})}); appendLog('Cancel sent'); }
+      catch(e){ appendLog('Cancel failed: '+e.message) }
+      overlayStop.disabled = false;
+    });
 
-            const commanderSlug = slugify(commander);
-            const themeSlug = theme ? slugify(theme) : null;
-            const budgetParam = budget && budget !== 'REGULAR' ? `?budget=${budget.toLowerCase()}` : '';
+    form.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      if (currentBuildId){ // act as stop
+        overlayStop.click(); return;
+      }
 
-            const commanderUrl = `https://json.edhrec.com/pages/commanders/${commanderSlug}${themeSlug ? '/' + themeSlug : ''}.json${budgetParam}`;
-            const avgDeckUrl = `https://json.edhrec.com/pages/average-decks/${commanderSlug}${themeSlug ? '/' + themeSlug : ''}.json${budgetParam}`;
+      // start
+      enterStarting(); appendLog('Starting build (sending request)');
+      try{
+        const fd = new FormData(form);
+        const res = await fetch('/start',{method:'POST',body:fd});
+        const data = await res.json();
+        if (!res.ok){ appendLog('Start failed: '+(data.error||JSON.stringify(data))); setStatus('Error'); exitIdle(); return; }
+        const id = data.build_id; appendLog('Build started: '+id); enterRunning(id);
 
-            edhrecStatus.textContent = 'Fetching EDHRec data...';
-            resultDiv.textContent = '';
+        // SSE
+        es = new EventSource(`/events?build_id=${id}`);
+        es.addEventListener('progress', ev=>{ try{ const d=JSON.parse(ev.data); appendLog(d.message); setStatus(d.message);}catch(e){ appendLog(ev.data); } });
+        es.addEventListener('request', ev=>{ try{ const d=JSON.parse(ev.data); appendLog('Server requests: '+(d.missing_key||JSON.stringify(d))); }catch(e){ appendLog(ev.data) } });
+        es.addEventListener('result', ev=>{ try{ const d=JSON.parse(ev.data).result; window.latestResult=d; resultDiv.textContent = formatDeck(d); downloadBtn.style.display='inline-block'; appendLog('Build finished'); setStatus('Finished'); }catch(e){ appendLog('Result parse error'); resultDiv.textContent = ev.data } if (es) es.close(); exitIdle(); });
+        es.addEventListener('cancelled', ev=>{ try{ const d=JSON.parse(ev.data||'{}'); appendLog('Cancelled: '+(d.message||'')); setStatus('Cancelled'); resultDiv.textContent=d.message||'Cancelled'; }catch(e){ appendLog('Cancelled') } if(es)es.close(); exitIdle(); });
+        es.addEventListener('error', ev=>{ try{ const d=JSON.parse(ev.data||'{}'); appendLog('Error: '+(d.message||'stream error')); setStatus('Error'); }catch(_){ appendLog('Stream error') } if(es) es.close(); exitIdle(); });
 
-            try {
-                const [commanderJson, avgJson] = await Promise.all([
-                    fetchJson(commanderUrl),
-                    fetchJson(avgDeckUrl),
-                ]);
-
-                const avgDeck = parseDeckFromList(avgJson?.deck || avgJson?.panels?.[0]?.contents || []);
-                const { cardDetails, topByType } = buildCardDetails(commanderJson?.cardlists || []);
-                const cardList = buildCardList(cardDetails);
-
-                const payload = {
-                    avg_deck: avgDeck,
-                    card_details: cardDetails,
-                    card_list: cardList,
-                    top_cards_by_type: topByType,
-                    similar: {}, // similar lookups are skipped to avoid extra requests; backend will skip if empty
-                };
-
-                edhrecTextarea.value = JSON.stringify(payload, null, 2);
-                edhrecStatus.textContent = 'EDHRec data fetched. Review and submit.';
-            } catch (err) {
-                edhrecStatus.textContent = `Failed to fetch EDHRec data: ${err.message}`;
-            }
-        };
-
-        fetchBtn.addEventListener('click', fetchEdhrecData);
-
-        async function postJson(url, body) {
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.json();
-        }
-
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            resultDiv.textContent = '';
-
-            const edhrecText = edhrecTextarea.value.trim();
-            let parsedEdhrec = null;
-            if (edhrecText) {
-                try {
-                    parsedEdhrec = JSON.parse(edhrecText);
-                } catch (err) {
-                    resultDiv.textContent = `Invalid EDHRec JSON: ${err.message}`;
-                    return;
-                }
-            }
-
-            const formData = new FormData(e.target);
-            if (parsedEdhrec) formData.set('edhrec_data', JSON.stringify(parsedEdhrec));
-
-            resultDiv.textContent = 'Starting build...';
-
-            try {
-                const startRes = await fetch('/start', { method: 'POST', body: formData });
-                const startJson = await startRes.json();
-                if (!startRes.ok) {
-                    resultDiv.textContent = `Error starting build: ${startJson.error || startJson}`;
-                    return;
-                }
-
-                const buildId = startJson.build_id;
-                resultDiv.textContent = `Build started (id=${buildId}). Listening for progress...`;
-
-                const es = new EventSource(`/events?build_id=${buildId}`);
-
-                es.addEventListener('progress', (ev) => {
-                    const data = JSON.parse(ev.data);
-                    resultDiv.textContent = data.message;
-                });
-
-                es.addEventListener('request', async (ev) => {
-                    const data = JSON.parse(ev.data);
-                    const missingRaw = data.missing_key || '';
-                    resultDiv.textContent = `Server requested missing data: ${missingRaw}. Fetching from EDHRec...`;
-
-                    // Try to extract a quoted token like 'card_details' or a card name from the server message.
-                    const quoted = (missingRaw.match(/'([^']+)'/) || [])[1];
-                    // If the server asked specifically for a card's details, the message format is: "Missing card details for 'Card Name' in provided EDHRec payload"
-                    const isCardDetailsMsg = /Missing card details for/.test(missingRaw) && quoted;
-
-                    try {
-                        if (isCardDetailsMsg) {
-                            const cardName = quoted;
-                            const cardSlug = slugify(cardName);
-                            const cardUrl = `https://json.edhrec.com/pages/cards/${cardSlug}.json`;
-                            try {
-                                const cardJson = await fetchJson(cardUrl);
-                                // cardJson shape varies; try common places for similar and card info
-                                const cardData = cardJson || {};
-                                // Build card_details entry
-                                const primary_type = cardData.primary_type || (cardData.types && cardData.types[0]) || cardData.type || (cardData.card && (cardData.card.type || cardData.card.primary_type)) || 'Unknown';
-                                const type = cardData.type || primary_type;
-                                const color_identity = cardData.color_identity || cardData.colorIdentity || (cardData.card && cardData.card.color_identity) || [];
-                                const cardDetailsEntry = {};
-                                cardDetailsEntry[cardName] = {
-                                    name: cardName,
-                                    primary_type: primary_type,
-                                    type: type,
-                                    color_identity: color_identity,
-                                };
-
-                                // Try to extract similar list
-                                let similarList = [];
-                                if (Array.isArray(cardData.similar)) {
-                                    similarList = cardData.similar;
-                                } else if (cardData.data && Array.isArray(cardData.data.similar)) {
-                                    similarList = cardData.data.similar;
-                                } else if (cardData.similar_cards && Array.isArray(cardData.similar_cards)) {
-                                    similarList = cardData.similar_cards;
-                                }
-
-                                // Normalize similar entries to {name, color_identity}
-                                const similarNormalized = {};
-                                similarNormalized[cardName] = (similarList || []).map((c) => {
-                                    if (typeof c === 'string') return { name: c, color_identity: [] };
-                                    return {
-                                        name: c.name || c.cardName || c.title || '',
-                                        color_identity: c.color_identity || c.colorIdentity || c.colorIdentity || [],
-                                    };
-                                }).filter(Boolean);
-
-                                const toSend = {
-                                    card_details: cardDetailsEntry,
-                                    similar: similarNormalized,
-                                };
-
-                                await postJson('/update', { build_id: buildId, edhrec_payload: toSend });
-                                resultDiv.textContent = `Posted card details and similar for ${cardName} to server.`;
-                                return;
-                            } catch (err) {
-                                // If fetching specific card failed, fall through to sending whatever payload we have
-                                console.warn('Failed to fetch card JSON', err);
-                            }
-                        }
-
-                        // Fallback: ensure we have commander-level payload and send the requested key if present, otherwise send full payload
-                        await fetchEdhrecData();
-                        const payloadText = document.getElementById('edhrec_data').value;
-                        const payload = payloadText ? JSON.parse(payloadText) : {};
-                        const toSend = {};
-                        // Try to map the missingRaw to a simple key (e.g., 'avg_deck', 'card_list', 'top_cards_by_type', 'similar', 'card_details')
-                        const simpleKey = quoted || (['avg_deck','card_list','top_cards_by_type','similar','card_details'].find(k => missingRaw.toLowerCase().includes(k)));
-                        if (simpleKey && payload[simpleKey]) {
-                            toSend[simpleKey] = payload[simpleKey];
-                        } else {
-                            // send entire payload as a fallback
-                            Object.assign(toSend, payload);
-                        }
-
-                        await postJson('/update', { build_id: buildId, edhrec_payload: toSend });
-                        resultDiv.textContent = `Posted missing data to server. Continuing...`;
-                    } catch (err) {
-                        resultDiv.textContent = `Failed to fetch/send missing data: ${err.message}`;
-                    }
-                 });
-
-                es.addEventListener('result', (ev) => {
-                    const data = JSON.parse(ev.data).result;
-                    const deck = data.deck || {};
-                    const deckSize = data.deck_size ?? Object.values(deck).reduce((acc, val) => acc + (parseInt(val, 10) || 0), 0);
-                    const deckLines = Object.entries(deck)
-                        .sort(([aName], [bName]) => aName.localeCompare(bName))
-                        .map(([name, count]) => `${count} ${name}`)
-                        .join('\n');
-
-                    const missing = (data.unavailable_cards || []).join(', ');
-                    resultDiv.textContent =
-`Deck (${deckSize} cards)\n${deckLines}\n\nUnavailable cards: ${missing || 'None 🎉'}`;
-                    es.close();
-                });
-
-                es.addEventListener('error', (ev) => {
-                    // generic error
-                    try {
-                        const err = JSON.parse(ev.data || '{}');
-                        if (err.message) resultDiv.textContent = `Error: ${err.message}`;
-                    } catch (_e) {
-                        // ignore
-                    }
-                });
-
-            } catch (error) {
-                resultDiv.textContent = `Error starting build: ${error.message}`;
-            }
-        });
-    </script>
+      }catch(err){ appendLog('Failed to start: '+err.message); setStatus('Error'); exitIdle(); }
+    });
+  </script>
 </body>
 </html>
