@@ -2,5 +2,6 @@ Flask==3.0.3
 Jinja2==3.1.2
 Unidecode==1.4.0
 requests==2.31.0
-pyedhrec==0.6.0
-pywebview==4.1.3
+pyedhrec==0.0.2
+pywebview>=6.0
+pyinstaller>=6.10.0

@@ -96,8 +96,7 @@
           <div class="deck-box card">
             <div id="result" class="deck-lines">No deck built yet. Click Build Deck to start.</div>
             <div style="margin-top:10px">
-              <button id="downloadBtn" class="ghost" style="display:none">Download deck.txt</button>
-              <button id="copyBtn" class="ghost" style="display:none; margin-left:8px">Copy deck</button>
+              <button id="copyBtn" class="ghost" style="display:none">Copy deck</button>
             </div>
           </div>
         </div>
@@ -140,7 +139,6 @@
     const resultDiv = document.getElementById('result');
     const statusText = document.getElementById('statusText');
     const progressLog = document.getElementById('progressLog');
-    const downloadBtn = document.getElementById('downloadBtn');
     const copyBtn = document.getElementById('copyBtn');
 
     let currentBuildId = null; let es = null; window.latestResult = null;
@@ -178,9 +176,6 @@
       return out;
     }
 
-    function downloadDeck(result){ const text = formatDeck(result); const blob = new Blob([text],{type:'text/plain'}); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='deck.txt'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
-
-    downloadBtn.addEventListener('click', ()=>{ if (window.latestResult) { downloadDeck(window.latestResult); appendLog('Deck downloaded'); flashButton(downloadBtn); const prior = downloadBtn.textContent; downloadBtn.textContent='Downloaded'; setTimeout(()=>downloadBtn.textContent=prior,1500); } });
     copyBtn.addEventListener('click', async ()=>{
       if (!window.latestResult) { appendLog('Nothing to copy'); return; }
       const deckObj = window.latestResult.deck || {};
@@ -241,7 +236,7 @@
             if (m){ const cur = parseInt(m[1],10); const tot = parseInt(m[2],10); if (tot>0){ const pct = Math.round((cur/tot)*100); overlayPercent.textContent = `${pct}% (${cur}/${tot})`; } }
         }catch(e){ appendLog(ev.data); } });
         es.addEventListener('request', ev=>{ try{ const d=JSON.parse(ev.data); appendLog('Server requests: '+(d.missing_key||JSON.stringify(d))); }catch(e){ appendLog(ev.data) } });
-        es.addEventListener('result', ev=>{ try{ const d=JSON.parse(ev.data).result; window.latestResult=d; resultDiv.textContent = formatDeck(d); downloadBtn.style.display='inline-block'; copyBtn.style.display='inline-block'; appendLog('Build finished'); setStatus('Finished'); }catch(e){ appendLog('Result parse error'); resultDiv.textContent = ev.data } if (es) es.close(); exitIdle(); });
+        es.addEventListener('result', ev=>{ try{ const d=JSON.parse(ev.data).result; window.latestResult=d; resultDiv.textContent = formatDeck(d); copyBtn.style.display='inline-block'; appendLog('Build finished'); setStatus('Finished'); }catch(e){ appendLog('Result parse error'); resultDiv.textContent = ev.data } if (es) es.close(); exitIdle(); });
         es.addEventListener('cancelled', ev=>{ try{ const d=JSON.parse(ev.data||'{}'); appendLog('Cancelled: '+(d.message||'')); setStatus('Cancelled'); resultDiv.textContent=d.message||'Cancelled'; }catch(e){ appendLog('Cancelled') } if(es)es.close(); exitIdle(); });
         es.addEventListener('error', ev=>{ try{ const d=JSON.parse(ev.data||'{}'); appendLog('Error: '+(d.message||'stream error')); setStatus('Error'); }catch(_){ appendLog('Stream error') } if(es) es.close(); exitIdle(); });
 
