@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, TextIO
 
 from unidecode import unidecode
-from edhrec_provider import ClientProvidedEdhrecProvider, EdhrecProvider, ServerEdhrecProvider
+from edhrec_provider import EdhrecProvider
 
 COLOR_TO_BASIC_LAND = {
     "W": "Plains",
@@ -46,8 +46,8 @@ def get_inventory() -> dict[str, dict[str, str]]:
 
 
 class DeckBuilder:
-    def __init__(self, inventory_file: TextIO, edhrec_provider: EdhrecProvider | None = None):
-        self.edhrec_provider = edhrec_provider or ServerEdhrecProvider()
+    def __init__(self, inventory_file: TextIO, edhrec_provider: EdhrecProvider):
+        self.edhrec_provider = edhrec_provider
         self.inventory = self.get_inventory(inventory_file)
         self.logger = logging.getLogger(__name__)
 
@@ -176,9 +176,7 @@ class DeckBuilder:
         else:
             new_deck[basic_land] = 1
 
-    def build(self, commander: str, partner: str = None, theme: str = None, budget_type: BudgetType = BudgetType.REGULAR, edhrec_provider: EdhrecProvider | None = None):
-        if edhrec_provider:
-            self.edhrec_provider = edhrec_provider
+    def build(self, commander: str, partner: str = None, theme: str = None, budget_type: BudgetType = BudgetType.REGULAR):
         if partner:
             commander_name = f"{commander}-{partner}"
         else:
@@ -217,16 +215,3 @@ class DeckBuilder:
             print(f"{number} {name}")
         size = self._get_deck_size(new_deck)
         print(f"Deck total size: {size}")
-
-
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-    # Reference cards by the exact card name, the library will format as needed
-    commander = "Lord of the Nazgul"
-    partner = None
-    theme = ""
-    inventory_file = open("inventory.csv", "r")
-
-    DeckBuilder(inventory_file).build(commander, partner, theme.lower(), BudgetType.BUDGET)
-
-    # change mana base according to deck
