@@ -6,13 +6,18 @@ from queue import Queue, Empty
 from threading import Thread, Event
 from urllib.parse import urlparse, unquote_plus
 import requests
+import os
+import sys
 
 from flask import Flask, request, render_template, jsonify, Response
 
 from edhrec_provider import ClientProvidedEdhrecProvider, ServerEdhrecProvider
 from main import BudgetType, DeckBuilder
 
-app = Flask(__name__, template_folder="templates")
+# When packaged with PyInstaller, templates are extracted to sys._MEIPASS; support both dev and frozen modes
+base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+template_dir = os.path.join(base_dir, 'templates')
+app = Flask(__name__, template_folder=template_dir)
 
 # Simple in-memory session store for builds
 # build_id -> {queue: Queue(), provider_payload: dict, finished: bool, update_event: Event, cancelled: bool}
@@ -240,6 +245,19 @@ def edhrec_build_id():
     except requests.RequestException as e:
         logging.getLogger(__name__).exception("Failed to fetch edhrec homepage for build id")
         return jsonify({"error": str(e)}), 502
+
+
+@app.route('/favicon.ico')
+def favicon():
+    """Serve a tiny SVG favicon to avoid 404s from browsers requesting /favicon.ico."""
+    svg = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">'
+        '<rect width="100%" height="100%" fill="#1f6feb"/>'
+        '<text x="32" y="38" font-size="36" text-anchor="middle" fill="white" font-family="Segoe UI, Roboto, Arial">D</text>'
+        '</svg>'
+    )
+    return Response(svg, mimetype='image/svg+xml')
 
 
 if __name__ == "__main__":

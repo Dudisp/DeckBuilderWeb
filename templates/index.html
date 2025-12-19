@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="icon" href="/favicon.ico" />
   <title>Deck Builder</title>
   <style>
     :root{
@@ -23,9 +24,16 @@
     input[type=text],select,input[type=file]{width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef8;background:transparent;font-size:14px}
 
     .controls{grid-column:1/-1;display:flex;gap:12px;justify-content:flex-end}
-    button.primary{background:var(--accent);color:#fff;padding:10px 14px;border-radius:10px;border:none;font-weight:700;cursor:pointer}
+    button.primary{background:var(--accent);color:#fff;padding:10px 14px;border-radius:10px;border:none;font-weight:700;cursor:pointer;transition:transform .06s ease, box-shadow .06s ease}
+    button.primary:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(31,111,235,0.12)}
+    button.primary:active{transform:translateY(0) scale(.995);opacity:0.95}
     button.primary[disabled]{opacity:0.6;cursor:not-allowed}
-    button.ghost{background:transparent;border:1px solid #e6eef8;padding:8px 12px;border-radius:8px;cursor:pointer}
+
+    button.ghost{background:#f8fafc;border:1px solid #e6eef8;padding:8px 12px;border-radius:8px;cursor:pointer;transition:background .12s ease, transform .06s ease}
+    button.ghost:hover{background:#eef4ff;transform:translateY(-1px)}
+    button.ghost:active{transform:translateY(0) scale(.995)}
+    button.ghost:focus{outline:2px solid rgba(37,99,235,0.15); outline-offset:2px}
+    button.ghost.flash{background:#e6f0ff; box-shadow:0 8px 20px rgba(37,99,235,0.12); transform:scale(.995)}
 
     /* overlay spinner */
     .overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(7,10,20,0.35);z-index:60}
@@ -33,6 +41,7 @@
     .panel{background:var(--card);padding:20px;border-radius:12px;min-width:320px;display:flex;flex-direction:column;gap:12px;align-items:center}
     .big-spinner{width:48px;height:48px;border-radius:50%;border:6px solid rgba(0,0,0,0.06);border-top-color:var(--accent);animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
+    #overlayPercent{font-weight:700;margin-top:6px;font-size:18px}
 
     /* right column */
     .right .card{padding:12px}
@@ -86,7 +95,10 @@
           <div class="meta">Status: <span id="statusText" class="status">Idle</span></div>
           <div class="deck-box card">
             <div id="result" class="deck-lines">No deck built yet. Click Build Deck to start.</div>
-            <div style="margin-top:10px"><button id="downloadBtn" class="ghost" style="display:none">Download deck.txt</button></div>
+            <div style="margin-top:10px">
+              <button id="downloadBtn" class="ghost" style="display:none">Download deck.txt</button>
+              <button id="copyBtn" class="ghost" style="display:none; margin-left:8px">Copy deck</button>
+            </div>
           </div>
         </div>
       </div>
@@ -106,6 +118,7 @@
   <div id="overlay" class="overlay">
     <div class="panel">
       <div class="big-spinner" aria-hidden="true"></div>
+      <div id="overlayPercent"></div>
       <div id="overlayText">Building deck...</div>
       <div style="display:flex;gap:8px">
         <button id="overlayStop" class="primary" style="background:var(--danger)">Stop</button>
@@ -121,12 +134,14 @@
     const buildLabel = document.getElementById('buildLabel');
     const overlay = document.getElementById('overlay');
     const overlayText = document.getElementById('overlayText');
+    const overlayPercent = document.getElementById('overlayPercent');
     const overlayStop = document.getElementById('overlayStop');
     const overlayClose = document.getElementById('overlayClose');
     const resultDiv = document.getElementById('result');
     const statusText = document.getElementById('statusText');
     const progressLog = document.getElementById('progressLog');
     const downloadBtn = document.getElementById('downloadBtn');
+    const copyBtn = document.getElementById('copyBtn');
 
     let currentBuildId = null; let es = null; window.latestResult = null;
 
@@ -137,8 +152,15 @@
       progressLog.scrollTop = progressLog.scrollHeight;
     }
 
+    function flashButton(btn){
+      try{
+        btn.classList.add('flash');
+        setTimeout(()=>btn.classList.remove('flash'),350);
+      }catch(e){}
+    }
+
     function showOverlay(text){ overlayText.textContent = text; overlay.classList.add('visible'); }
-    function hideOverlay(){ overlay.classList.remove('visible'); }
+    function hideOverlay(){ overlay.classList.remove('visible'); overlayPercent.textContent = '' }
 
     function setStatus(txt){ statusText.textContent = txt }
 
@@ -158,7 +180,36 @@
 
     function downloadDeck(result){ const text = formatDeck(result); const blob = new Blob([text],{type:'text/plain'}); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='deck.txt'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
 
-    downloadBtn.addEventListener('click', ()=>{ if (window.latestResult) downloadDeck(window.latestResult); });
+    downloadBtn.addEventListener('click', ()=>{ if (window.latestResult) { downloadDeck(window.latestResult); appendLog('Deck downloaded'); flashButton(downloadBtn); const prior = downloadBtn.textContent; downloadBtn.textContent='Downloaded'; setTimeout(()=>downloadBtn.textContent=prior,1500); } });
+    copyBtn.addEventListener('click', async ()=>{
+      if (!window.latestResult) { appendLog('Nothing to copy'); return; }
+      const deckObj = window.latestResult.deck || {};
+      const lines = Object.entries(deckObj).sort((a,b)=>a[0].localeCompare(b[0])).map(([name,count])=>`${count} ${name}`);
+      const text = lines.join('\n');
+      if (!text) { appendLog('Deck empty, nothing to copy'); return; }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+          appendLog('Deck copied to clipboard');
+          flashButton(copyBtn);
+          const prior = copyBtn.textContent; copyBtn.textContent='Copied!'; setTimeout(()=>copyBtn.textContent=prior,1500);
+        } else {
+          // fallback
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed'; ta.style.left = '-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          const ok = document.execCommand('copy');
+          ta.remove();
+          appendLog(ok ? 'Deck copied to clipboard (fallback)' : 'Copy failed');
+          if (ok) flashButton(copyBtn);
+          const prior = copyBtn.textContent; copyBtn.textContent= ok ? 'Copied!' : 'Failed'; setTimeout(()=>copyBtn.textContent=prior,1500);
+        }
+      } catch (err) {
+        appendLog('Copy failed: ' + err.message);
+      }
+    });
 
     overlayStop.addEventListener('click', async ()=>{
       if (!currentBuildId) return; overlayStop.disabled = true; appendLog('Cancel requested');
@@ -184,9 +235,13 @@
 
         // SSE
         es = new EventSource(`/events?build_id=${id}`);
-        es.addEventListener('progress', ev=>{ try{ const d=JSON.parse(ev.data); appendLog(d.message); setStatus(d.message);}catch(e){ appendLog(ev.data); } });
+        es.addEventListener('progress', ev=>{ try{ const d=JSON.parse(ev.data); appendLog(d.message); setStatus(d.message);
+            // parse messages like 'Checking 3/12' to show percent
+            const m = (d.message||'').match(/Checking\s*(\d+)\s*\/\s*(\d+)/i);
+            if (m){ const cur = parseInt(m[1],10); const tot = parseInt(m[2],10); if (tot>0){ const pct = Math.round((cur/tot)*100); overlayPercent.textContent = `${pct}% (${cur}/${tot})`; } }
+        }catch(e){ appendLog(ev.data); } });
         es.addEventListener('request', ev=>{ try{ const d=JSON.parse(ev.data); appendLog('Server requests: '+(d.missing_key||JSON.stringify(d))); }catch(e){ appendLog(ev.data) } });
-        es.addEventListener('result', ev=>{ try{ const d=JSON.parse(ev.data).result; window.latestResult=d; resultDiv.textContent = formatDeck(d); downloadBtn.style.display='inline-block'; appendLog('Build finished'); setStatus('Finished'); }catch(e){ appendLog('Result parse error'); resultDiv.textContent = ev.data } if (es) es.close(); exitIdle(); });
+        es.addEventListener('result', ev=>{ try{ const d=JSON.parse(ev.data).result; window.latestResult=d; resultDiv.textContent = formatDeck(d); downloadBtn.style.display='inline-block'; copyBtn.style.display='inline-block'; appendLog('Build finished'); setStatus('Finished'); }catch(e){ appendLog('Result parse error'); resultDiv.textContent = ev.data } if (es) es.close(); exitIdle(); });
         es.addEventListener('cancelled', ev=>{ try{ const d=JSON.parse(ev.data||'{}'); appendLog('Cancelled: '+(d.message||'')); setStatus('Cancelled'); resultDiv.textContent=d.message||'Cancelled'; }catch(e){ appendLog('Cancelled') } if(es)es.close(); exitIdle(); });
         es.addEventListener('error', ev=>{ try{ const d=JSON.parse(ev.data||'{}'); appendLog('Error: '+(d.message||'stream error')); setStatus('Error'); }catch(_){ appendLog('Stream error') } if(es) es.close(); exitIdle(); });
 
