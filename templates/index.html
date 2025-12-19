@@ -216,54 +216,167 @@
 
         fetchBtn.addEventListener('click', fetchEdhrecData);
 
+        async function postJson(url, body) {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        }
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             resultDiv.textContent = '';
 
             const edhrecText = edhrecTextarea.value.trim();
-            if (!edhrecText) {
-                resultDiv.textContent = 'Please fetch EDHRec data first (or paste EDHRec JSON).';
-                return;
-            }
-
-            let parsedEdhrec;
-            try {
-                parsedEdhrec = JSON.parse(edhrecText);
-            } catch (err) {
-                resultDiv.textContent = `Invalid EDHRec JSON: ${err.message}`;
-                return;
+            let parsedEdhrec = null;
+            if (edhrecText) {
+                try {
+                    parsedEdhrec = JSON.parse(edhrecText);
+                } catch (err) {
+                    resultDiv.textContent = `Invalid EDHRec JSON: ${err.message}`;
+                    return;
+                }
             }
 
             const formData = new FormData(e.target);
-            formData.set('edhrec_data', JSON.stringify(parsedEdhrec));
-            resultDiv.textContent = 'Building deck...';
+            if (parsedEdhrec) formData.set('edhrec_data', JSON.stringify(parsedEdhrec));
+
+            resultDiv.textContent = 'Starting build...';
 
             try {
-                const response = await fetch('/build_deck', {
-                    method: 'POST',
-                    body: formData
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    resultDiv.textContent = `Error: ${data.error || 'Unknown error'}`;
+                const startRes = await fetch('/start', { method: 'POST', body: formData });
+                const startJson = await startRes.json();
+                if (!startRes.ok) {
+                    resultDiv.textContent = `Error starting build: ${startJson.error || startJson}`;
                     return;
                 }
 
-                const deck = data.deck || {};
-                const deckSize = data.deck_size ?? Object.values(deck).reduce((acc, val) => acc + (parseInt(val, 10) || 0), 0);
-                const deckLines = Object.entries(deck)
-                    .sort(([aName], [bName]) => aName.localeCompare(bName))
-                    .map(([name, count]) => `${count} ${name}`)
-                    .join('\n');
+                const buildId = startJson.build_id;
+                resultDiv.textContent = `Build started (id=${buildId}). Listening for progress...`;
 
-                const missing = (data.unavailable_cards || []).join(', ');
-                resultDiv.textContent =
-`Deck (${deckSize} cards)
-${deckLines}
+                const es = new EventSource(`/events?build_id=${buildId}`);
 
-Unavailable cards: ${missing || 'None 🎉'}`;
+                es.addEventListener('progress', (ev) => {
+                    const data = JSON.parse(ev.data);
+                    resultDiv.textContent = data.message;
+                });
+
+                es.addEventListener('request', async (ev) => {
+                    const data = JSON.parse(ev.data);
+                    const missingRaw = data.missing_key || '';
+                    resultDiv.textContent = `Server requested missing data: ${missingRaw}. Fetching from EDHRec...`;
+
+                    // Try to extract a quoted token like 'card_details' or a card name from the server message.
+                    const quoted = (missingRaw.match(/'([^']+)'/) || [])[1];
+                    // If the server asked specifically for a card's details, the message format is: "Missing card details for 'Card Name' in provided EDHRec payload"
+                    const isCardDetailsMsg = /Missing card details for/.test(missingRaw) && quoted;
+
+                    try {
+                        if (isCardDetailsMsg) {
+                            const cardName = quoted;
+                            const cardSlug = slugify(cardName);
+                            const cardUrl = `https://json.edhrec.com/pages/cards/${cardSlug}.json`;
+                            try {
+                                const cardJson = await fetchJson(cardUrl);
+                                // cardJson shape varies; try common places for similar and card info
+                                const cardData = cardJson || {};
+                                // Build card_details entry
+                                const primary_type = cardData.primary_type || (cardData.types && cardData.types[0]) || cardData.type || (cardData.card && (cardData.card.type || cardData.card.primary_type)) || 'Unknown';
+                                const type = cardData.type || primary_type;
+                                const color_identity = cardData.color_identity || cardData.colorIdentity || (cardData.card && cardData.card.color_identity) || [];
+                                const cardDetailsEntry = {};
+                                cardDetailsEntry[cardName] = {
+                                    name: cardName,
+                                    primary_type: primary_type,
+                                    type: type,
+                                    color_identity: color_identity,
+                                };
+
+                                // Try to extract similar list
+                                let similarList = [];
+                                if (Array.isArray(cardData.similar)) {
+                                    similarList = cardData.similar;
+                                } else if (cardData.data && Array.isArray(cardData.data.similar)) {
+                                    similarList = cardData.data.similar;
+                                } else if (cardData.similar_cards && Array.isArray(cardData.similar_cards)) {
+                                    similarList = cardData.similar_cards;
+                                }
+
+                                // Normalize similar entries to {name, color_identity}
+                                const similarNormalized = {};
+                                similarNormalized[cardName] = (similarList || []).map((c) => {
+                                    if (typeof c === 'string') return { name: c, color_identity: [] };
+                                    return {
+                                        name: c.name || c.cardName || c.title || '',
+                                        color_identity: c.color_identity || c.colorIdentity || c.colorIdentity || [],
+                                    };
+                                }).filter(Boolean);
+
+                                const toSend = {
+                                    card_details: cardDetailsEntry,
+                                    similar: similarNormalized,
+                                };
+
+                                await postJson('/update', { build_id: buildId, edhrec_payload: toSend });
+                                resultDiv.textContent = `Posted card details and similar for ${cardName} to server.`;
+                                return;
+                            } catch (err) {
+                                // If fetching specific card failed, fall through to sending whatever payload we have
+                                console.warn('Failed to fetch card JSON', err);
+                            }
+                        }
+
+                        // Fallback: ensure we have commander-level payload and send the requested key if present, otherwise send full payload
+                        await fetchEdhrecData();
+                        const payloadText = document.getElementById('edhrec_data').value;
+                        const payload = payloadText ? JSON.parse(payloadText) : {};
+                        const toSend = {};
+                        // Try to map the missingRaw to a simple key (e.g., 'avg_deck', 'card_list', 'top_cards_by_type', 'similar', 'card_details')
+                        const simpleKey = quoted || (['avg_deck','card_list','top_cards_by_type','similar','card_details'].find(k => missingRaw.toLowerCase().includes(k)));
+                        if (simpleKey && payload[simpleKey]) {
+                            toSend[simpleKey] = payload[simpleKey];
+                        } else {
+                            // send entire payload as a fallback
+                            Object.assign(toSend, payload);
+                        }
+
+                        await postJson('/update', { build_id: buildId, edhrec_payload: toSend });
+                        resultDiv.textContent = `Posted missing data to server. Continuing...`;
+                    } catch (err) {
+                        resultDiv.textContent = `Failed to fetch/send missing data: ${err.message}`;
+                    }
+                 });
+
+                es.addEventListener('result', (ev) => {
+                    const data = JSON.parse(ev.data).result;
+                    const deck = data.deck || {};
+                    const deckSize = data.deck_size ?? Object.values(deck).reduce((acc, val) => acc + (parseInt(val, 10) || 0), 0);
+                    const deckLines = Object.entries(deck)
+                        .sort(([aName], [bName]) => aName.localeCompare(bName))
+                        .map(([name, count]) => `${count} ${name}`)
+                        .join('\n');
+
+                    const missing = (data.unavailable_cards || []).join(', ');
+                    resultDiv.textContent =
+`Deck (${deckSize} cards)\n${deckLines}\n\nUnavailable cards: ${missing || 'None 🎉'}`;
+                    es.close();
+                });
+
+                es.addEventListener('error', (ev) => {
+                    // generic error
+                    try {
+                        const err = JSON.parse(ev.data || '{}');
+                        if (err.message) resultDiv.textContent = `Error: ${err.message}`;
+                    } catch (_e) {
+                        // ignore
+                    }
+                });
+
             } catch (error) {
-                resultDiv.textContent = `Error: ${error.message}`;
+                resultDiv.textContent = `Error starting build: ${error.message}`;
             }
         });
     </script>

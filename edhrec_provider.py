@@ -1,21 +1,4 @@
-from typing import Any, Protocol
-
-
-class EdhrecProvider(Protocol):
-    def get_avg_deck(self, commander_name: str, theme: str | None, budget_type: Any) -> dict[str, int]:
-        ...
-
-    def get_card_list(self, card_names: list[str]) -> dict:
-        ...
-
-    def get_top_cards_for_type(self, commander_name: str, card_type: str) -> list[dict[str, Any]]:
-        ...
-
-    def get_similar(self, card_name: str) -> list[dict[str, Any]]:
-        ...
-
-    def get_card_details(self, card_name: str) -> dict[str, Any]:
-        ...
+from typing import Any
 
 
 class ClientProvidedEdhrecProvider:
@@ -66,4 +49,3 @@ class ClientProvidedEdhrecProvider:
         if card_name in details:
             return details[card_name]
         raise KeyError(f"Missing card details for '{card_name}' in provided EDHRec payload")
-

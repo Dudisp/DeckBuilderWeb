@@ -3,10 +3,11 @@ import logging
 import random
 from collections import defaultdict
 from enum import Enum
-from typing import Any, TextIO
+from typing import Any, TextIO, Callable
+from typing import Any as TypeAny
 
 from unidecode import unidecode
-from edhrec_provider import EdhrecProvider
+from edhrec_provider import ClientProvidedEdhrecProvider
 
 COLOR_TO_BASIC_LAND = {
     "W": "Plains",
@@ -35,10 +36,22 @@ class CardType(Enum):
 
 
 class DeckBuilder:
-    def __init__(self, inventory_file: TextIO, edhrec_provider: EdhrecProvider):
+    def __init__(self, inventory_file: TextIO, edhrec_provider: TypeAny, progress_callback: Callable[[str], None] = None):
+        # edhrec_provider may be any object implementing the expected methods (ClientProvidedEdhrecProvider is typical)
         self.edhrec_provider = edhrec_provider
         self.inventory = self.get_inventory(inventory_file)
         self.logger = logging.getLogger(__name__)
+        self.progress_callback = progress_callback
+
+    def _log(self, message: str) -> None:
+        """Log to logger and forward progress to callback if provided."""
+        self.logger.info(message)
+        if self.progress_callback:
+            try:
+                self.progress_callback(message)
+            except Exception:
+                # keep builder robust if callback fails
+                self.logger.exception("Progress callback failed")
 
     def get_inventory(self, inventory_file) -> dict[str, dict[str, str]]:
         inventory: dict[str, dict[str, str]] = dict()
@@ -90,6 +103,7 @@ class DeckBuilder:
         return extra_cards_by_type
 
     def get_top_cards_for_card_type(self, commander_name: str, card_type: str) -> list[dict[str, Any]]:
+        top_cards: list[dict[str, Any]] = []
         match card_type:
             case CardType.CREATURE.value:
                 top_cards = self.edhrec_provider.get_top_cards_for_type(commander_name, CardType.CREATURE.value)
@@ -123,18 +137,18 @@ class DeckBuilder:
         commander_color_identity = self._get_color_identity(commander, partner)
         
         for counter, unavailable_card in enumerate(unavailable_cards, 1):
-            self.logger.info(f"Checking {counter}/{len(unavailable_cards)} - {unavailable_card}")
+            self._log(f"Checking {counter}/{len(unavailable_cards)} - {unavailable_card}")
             if self._find_similar_card(unavailable_card, commander_color_identity, new_deck):
                 continue
 
             card_details = self.edhrec_provider.get_card_details(self._fix_card_name(unavailable_card))
             if card_details["type"] == CardType.LAND.value:
-                self.logger.info(f"{unavailable_card} is a land, replace with Basic Land")
+                self._log(f"{unavailable_card} is a land, replace with Basic Land")
                 self._add_basic_land_to_deck(commander_color_identity, new_deck)
             else:
                 still_unavailable_cards.append(unavailable_card)
-                self.logger.info(f"Did not find a replacement for {unavailable_card}")
-        
+                self._log(f"Did not find a replacement for {unavailable_card}")
+
         return new_deck, still_unavailable_cards
     
     def _get_color_identity(self, commander: str, partner: str | None) -> list[str]:
@@ -150,12 +164,12 @@ class DeckBuilder:
             if (self._is_color_identity_match(similar["color_identity"], commander_color_identity) and
                 similar["name"] not in new_deck and similar["name"] in self.inventory):
                 new_deck[similar["name"]] = 1
-                self.logger.info(f"Found {similar['name']} similar to {unavailable_card}")
+                self._log(f"Found {similar['name']} similar to {unavailable_card}")
                 return True
         return False
     
     def _fix_card_name(self, unavailable_card: str) -> str:
-        return unidecode(unavailable_card).replace(" // ", "-").replace(":", "")
+        return unidecode(unavailable_card).replace(" // ", "-").replace(":" , "")
 
     def _add_basic_land_to_deck(self, color_identity: list[str], new_deck: dict[str, int]) -> None:
         color = random.choice(color_identity)
