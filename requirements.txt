@@ -3,5 +3,3 @@ uvicorn[standard]==0.22.0
 python-multipart==0.0.6
 Jinja2==3.1.2
 Unidecode==1.4.0
-# Optional: if you want to expose FastAPI via WSGI on hosts that only support WSGI, install an ASGI->WSGI adapter like 'asgi2wsgi'
-asgi2wsgi==1.0.2
