@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deck Builder</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 24px;
+            background: #f7f7f7;
+        }
+        h1 {
+            text-align: center;
+        }
+        form {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            background: #fff;
+            padding: 16px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        }
+        form > div {
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        input, select {
+            padding: 8px;
+        }
+        button {
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .secondary {
+            background-color: #2d7dd2;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 12px;
+            background: #fff;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        }
+    </style>
+</head>
+<body>
+    <h1>Deck Builder</h1>
+    <form id="deckForm" enctype="multipart/form-data">
+        <div>
+            <label for="commander">Commander</label>
+            <input type="text" id="commander" name="commander" placeholder="e.g. Lord of the Nazgul" required>
+        </div>
+        <div>
+            <label for="partner">Partner (optional)</label>
+            <input type="text" id="partner" name="partner" placeholder="Partner name">
+        </div>
+        <div>
+            <label for="theme">Theme (optional)</label>
+            <input type="text" id="theme" name="theme" placeholder="e.g. zombies">
+        </div>
+        <div>
+            <label for="budget">Budget</label>
+            <select id="budget" name="budget">
+                <option value="REGULAR">Regular</option>
+                <option value="BUDGET">Budget</option>
+                <option value="EXPANSIVE">Expansive</option>
+            </select>
+        </div>
+        <div>
+            <label for="inventory">Inventory CSV</label>
+            <input type="file" id="inventory" name="inventory" accept=".csv" required>
+        </div>
+        <div>
+            <label for="edhrec_data">EDHRec data (JSON fetched in browser)</label>
+            <textarea id="edhrec_data" name="edhrec_data" rows="10" placeholder='{"avg_deck": {"Card": 2}, "card_details": {...}}'></textarea>
+            <small id="edhrec_status" style="color:#555;"></small>
+        </div>
+        <div style="display:flex; gap:8px; align-items:flex-end;">
+            <button type="button" class="secondary" id="fetchEdhrecBtn">Fetch EDHRec data</button>
+            <button type="submit">Build Deck</button>
+        </div>
+    </form>
+
+    <div id="result"></div>
+
+    <script>
+        const form = document.getElementById('deckForm');
+        const resultDiv = document.getElementById('result');
+        const fetchBtn = document.getElementById('fetchEdhrecBtn');
+        const edhrecTextarea = document.getElementById('edhrec_data');
+        const edhrecStatus = document.getElementById('edhrec_status');
+
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+        const slugify = (str) =>
+            str
+                .toLowerCase()
+                .replace(/[^a-z0-9\s/-]/g, '')
+                .trim()
+                .replace(/\s+/g, '-')
+                .replace(/-+/g, '-');
+
+        const fetchJson = async (url) => {
+            const res = await fetch(url, { credentials: 'omit' });
+            if (!res.ok) throw new Error(`Request failed ${res.status}: ${url}`);
+            return res.json();
+        };
+
+        const parseDeckFromList = (list) => {
+            const deck = {};
+            if (!Array.isArray(list)) return deck;
+            for (const line of list) {
+                const parts = String(line).trim().split(' ');
+                if (!parts[0] || isNaN(Number(parts[0]))) continue;
+                const qty = Number(parts.shift());
+                const name = parts.join(' ');
+                if (name) deck[name] = qty;
+            }
+            return deck;
+        };
+
+        const buildCardDetails = (cardlists) => {
+            const cardDetails = {};
+            const topByType = {};
+            if (!Array.isArray(cardlists)) return { cardDetails, topByType };
+
+            for (const group of cardlists) {
+                const cards = group.cards || [];
+                for (const card of cards) {
+                    const name = card.name;
+                    const primary_type = (card.types && card.types[0]) || card.primary_type || card.type || 'Unknown';
+                    cardDetails[name] = {
+                        name,
+                        primary_type,
+                        type: card.type || primary_type,
+                        color_identity: card.color_identity || card.colorIdentity || [],
+                    };
+                    if (!topByType[primary_type]) topByType[primary_type] = [];
+                    topByType[primary_type].push({
+                        name,
+                        primary_type,
+                        color_identity: cardDetails[name].color_identity,
+                    });
+                }
+            }
+
+            // sort each type list by EDHRec rank if present
+            Object.values(topByType).forEach((arr) => arr.sort((a, b) => (a.rank || 0) - (b.rank || 0)));
+            return { cardDetails, topByType };
+        };
+
+        const buildCardList = (cardDetails) => {
+            const cards = {};
+            Object.entries(cardDetails).forEach(([name, detail]) => {
+                cards[name] = { primary_type: detail.primary_type, type: detail.type, color_identity: detail.color_identity };
+            });
+            return { cards };
+        };
+
+        const fetchEdhrecData = async () => {
+            const commander = document.getElementById('commander').value.trim();
+            const theme = document.getElementById('theme').value.trim();
+            const budget = document.getElementById('budget').value;
+            if (!commander) {
+                edhrecStatus.textContent = 'Commander is required to fetch EDHRec data.';
+                return;
+            }
+
+            const commanderSlug = slugify(commander);
+            const themeSlug = theme ? slugify(theme) : null;
+            const budgetParam = budget && budget !== 'REGULAR' ? `?budget=${budget.toLowerCase()}` : '';
+
+            const commanderUrl = `https://json.edhrec.com/pages/commanders/${commanderSlug}${themeSlug ? '/' + themeSlug : ''}.json${budgetParam}`;
+            const avgDeckUrl = `https://json.edhrec.com/pages/average-decks/${commanderSlug}${themeSlug ? '/' + themeSlug : ''}.json${budgetParam}`;
+
+            edhrecStatus.textContent = 'Fetching EDHRec data...';
+            resultDiv.textContent = '';
+
+            try {
+                const [commanderJson, avgJson] = await Promise.all([
+                    fetchJson(commanderUrl),
+                    fetchJson(avgDeckUrl),
+                ]);
+
+                const avgDeck = parseDeckFromList(avgJson?.deck || avgJson?.panels?.[0]?.contents || []);
+                const { cardDetails, topByType } = buildCardDetails(commanderJson?.cardlists || []);
+                const cardList = buildCardList(cardDetails);
+
+                const payload = {
+                    avg_deck: avgDeck,
+                    card_details: cardDetails,
+                    card_list: cardList,
+                    top_cards_by_type: topByType,
+                    similar: {}, // similar lookups are skipped to avoid extra requests; backend will skip if empty
+                };
+
+                edhrecTextarea.value = JSON.stringify(payload, null, 2);
+                edhrecStatus.textContent = 'EDHRec data fetched. Review and submit.';
+            } catch (err) {
+                edhrecStatus.textContent = `Failed to fetch EDHRec data: ${err.message}`;
+            }
+        };
+
+        fetchBtn.addEventListener('click', fetchEdhrecData);
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            resultDiv.textContent = '';
+
+            const edhrecText = edhrecTextarea.value.trim();
+            if (!edhrecText) {
+                resultDiv.textContent = 'Please fetch EDHRec data first (or paste EDHRec JSON).';
+                return;
+            }
+
+            let parsedEdhrec;
+            try {
+                parsedEdhrec = JSON.parse(edhrecText);
+            } catch (err) {
+                resultDiv.textContent = `Invalid EDHRec JSON: ${err.message}`;
+                return;
+            }
+
+            const formData = new FormData(e.target);
+            formData.set('edhrec_data', JSON.stringify(parsedEdhrec));
+            resultDiv.textContent = 'Building deck...';
+
+            try {
+                const response = await fetch('/build_deck', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    resultDiv.textContent = `Error: ${data.error || 'Unknown error'}`;
+                    return;
+                }
+
+                const deck = data.deck || {};
+                const deckSize = data.deck_size ?? Object.values(deck).reduce((acc, val) => acc + (parseInt(val, 10) || 0), 0);
+                const deckLines = Object.entries(deck)
+                    .sort(([aName], [bName]) => aName.localeCompare(bName))
+                    .map(([name, count]) => `${count} ${name}`)
+                    .join('\n');
+
+                const missing = (data.unavailable_cards || []).join(', ');
+                resultDiv.textContent =
+`Deck (${deckSize} cards)
+${deckLines}
+
+Unavailable cards: ${missing || 'None 🎉'}`;
+            } catch (error) {
+                resultDiv.textContent = `Error: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
